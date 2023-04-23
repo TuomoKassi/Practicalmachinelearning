@@ -1,0 +1,158 @@
+---
+title: "Practical machine learning - final project"
+author: "Tuomo Kässi"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Synopsis
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+The purpose of this project is to predict the type of activity undertaken by people exercising. This is the `classe` variable in the data.
+
+
+## Loading data and required libraries
+
+We first load the relevant data and libraries. 
+
+```{r}
+library(knitr)
+library(caret)
+library(corrplot)
+dataurl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+data <- read.csv(url(dataurl))
+```
+
+Split into separate training and test sets.
+```{r}
+inTrain  <- createDataPartition(data$classe, p=0.7, list=FALSE)
+TrainSet <- data[inTrain, ]
+TestSet  <- data[-inTrain, ]
+```
+
+## Data preprocessing
+
+Check training and test set dimensions.
+```{r}
+dim(TrainSet)
+
+dim(TestSet)
+
+```  
+Then we remove variables with Nearly Zero Variance, since we expect them not to provide any predictive power.
+
+```{r}
+NZV <- nearZeroVar(TrainSet)
+TrainSet <- TrainSet[, -NZV]
+TestSet  <- TestSet[, -NZV]
+dim(TrainSet)
+```
+
+We also remove variables that are mostly NA
+```{r}
+AllNA    <- sapply(TrainSet, function(x) mean(is.na(x))) > 0.95
+TrainSet <- TrainSet[, AllNA==FALSE]
+TestSet  <- TestSet[, AllNA==FALSE]
+``` 
+
+We also variables that are not used for prediction such as identification only variables (columns 1 to 5)
+```{r}
+TrainSet <- TrainSet[, -(1:5)]
+TestSet  <- TestSet[, -(1:5)]
+```
+
+We are left with the following data 
+```{r}
+dim(TrainSet)
+
+dim(TestSet)
+```  
+
+
+## Modeling: Random forest with cross-validation
+Cross-validation is a often used method of checking the variation of the statistical data. The data is divided to three or five (or n) folds. One of the folds is reserved for testing and the rest of the folds are used for training. When the procedure is repeated n times and the average is calculated we have an estimate for statistical performance.     
+
+
+```{r}
+set.seed(111)
+controlRF <- trainControl(method="cv", number=3, verboseIter=FALSE)
+modFitRandForest <- train(classe ~ ., data=TrainSet, method="rf",
+                          trControl=controlRF)
+modFitRandForest$finalModel
+```
+
+Prediction on Test dataset
+```{r}
+predictRandForest <- predict(modFitRandForest, newdata=TestSet)
+confMatRandForest <- confusionMatrix(predictRandForest, as.factor(TestSet$classe))
+confMatRandForest 
+``` 
+
+Visualise prediction in test data set.
+
+```{r, echo=FALSE}
+plot(confMatRandForest$table, col = confMatRandForest$byClass, 
+     main = paste("Random Forest - Accuracy =",
+                  round(confMatRandForest$overall['Accuracy'], 4)))
+``` 
+
+## Modeling: Generalized boosted models with cross-validation
+
+```{r}
+set.seed(111)
+library(gbm)
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+modFitGBM  <- train(classe ~ ., data=TrainSet, method = "gbm",
+                    trControl = controlGBM, verbose = FALSE)
+```
+
+Prediction in Test dataset
+
+```{r}
+predictGBM <- predict(modFitGBM, newdata=TestSet)
+confMatGBM <- confusionMatrix(predictGBM, as.factor(TestSet$classe))
+confMatGBM
+``` 
+
+Again we plot performance of the model.
+
+```{r, echo=FALSE}
+plot(confMatGBM$table, col = confMatGBM$byClass, 
+     main = paste("GBM - Accuracy =", round(confMatGBM$overall['Accuracy'], 4)))
+``` 
+
+We find that both models perform extremely well, but the random forest model has a slight edge over generalized boosted trees. 
+
+Based on the prediction error in test data set, we expect the random forest model to be able to predict 99.8% of the cases correctly.
+
+## Prediction in unseen test data
+
+Finally, we put the preferred model to a true test by checking how it performs in a completely unseen data.
+
+First we load the test data.
+
+```{r}
+UrlTest  <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+newdata <- read.csv(url(UrlTest))
+```
+
+Then we clean up the test data 
+```{r}
+newdata <- newdata[,-NZV]
+newdata <- newdata[,-AllNA==FALSE]
+newdata <- newdata[, -(1:5)]
+
+dim(newdata)
+```
+
+Then we can apply the model to the new data. As we argue above, we expect that 99.8% of these classes are correct. :) 
+
+```{r}
+predictTEST <- predict(modFitRandForest, newdata=newdata)
+predictTEST
+```
